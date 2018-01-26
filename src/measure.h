@@ -80,7 +80,7 @@ class ETeamMeasure : public Measure
     bool start_();
     bool stop_();
 
-    void reset_() {};
+    void reset_();
 
     Energy energy();
 };

@@ -91,8 +91,9 @@ void Measure::reset()
 {
     if (_proc->valid()) {
         _last_proc_time = _proc->time();
-    } else 
+    } else {
         _last_proc_time = {};
+    }
 
     _measured = 0;
     _not_measured = 0;
@@ -124,6 +125,11 @@ bool ETeamMeasure::stop_()
         return true;
 
     return stop_energy(this->_proc->pid()) == 0;
+}
+
+void ETeamMeasure::reset_()
+{
+    this->_running = false;
 }
 
 Energy ETeamMeasure::energy()
