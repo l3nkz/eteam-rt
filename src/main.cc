@@ -15,10 +15,12 @@
 #include <sys/signalfd.h>
 #include <sys/types.h>
 
+#include "program.h"
 #include "process.h"
 
 
-class Config {
+class Config
+{
    public:
     class DisplayUsage
     {};
@@ -266,116 +268,117 @@ std::string Config::info_string() const
 }
 
 
-class Sampler
-{
+class ProcessHandle {
    private:
-    std::vector<ProcessPtr> _processes;
+    Program _prog;
+    ProcessPtr _cur;
 
-    int _measure;
-    int _not_measure;
-
-    bool _running;
-    bool _sampling;
-    bool _measuring;
+    int _runs;
+    std::vector<std::tuple<Energy, Time, double>> _stats;
 
    public:
-    Sampler(const std::vector<ProcessPtr> &processes, const Config &conf);
+    ProcessHandle(const Program& prog);
 
-    void start();
-    void step();
-    void stop();
+    bool running() const;
+    bool finished() const;
+
+    bool start(int max_runs);
+    void kill();
+    void cleanup();
+
+    std::string name() const;
+    std::string type() const;
+    void display_stats() const;
 };
 
-Sampler::Sampler(const std::vector<ProcessPtr> &processes, const Config &conf) :
-    _processes{processes}, _measure{0}, _not_measure{0}, _running{false}, _sampling{true},
-    _measuring{false}
-{
-    double rate = conf.sampling_rate();
-    int interval = conf.sampling_interval();
+ProcessHandle::ProcessHandle(const Program& prog) :
+    _prog{prog}, _cur{nullptr}, _runs{0}, _stats{}
+{}
 
-    if (rate == 1.0) {
-        _sampling = false;
-    } else {
-        _measure = std::round(interval * rate);
-        _not_measure = std::round(interval * (1.0 - rate));
+bool ProcessHandle::running() const
+{
+    return _cur && _cur->running();
+}
+
+bool ProcessHandle::finished() const
+{
+    return !_cur || _cur->finished();
+}
+
+bool ProcessHandle::start(int max_runs)
+{
+    if (running())
+        return true;
+
+    if (_runs >= max_runs)
+        return false;
+
+    _cur = _prog.run();
+    _runs++;
+    return true;
+}
+
+void ProcessHandle::kill()
+{
+    if (!_cur)
+        return;
+
+    if (_cur->running())
+        _cur->kill();
+
+    cleanup();
+}
+
+void ProcessHandle::cleanup()
+{
+    if (!_cur || !_cur->finished())
+        return;
+
+    /* Get the statistics and clean up the zombie */
+    _stats.emplace_back(std::make_tuple(_cur->energy(), _cur->time(), _cur->rate()));
+    _cur->wait();
+
+    /* Clear the pointer to the process */
+    _cur.reset();
+}
+
+std::string ProcessHandle::name() const
+{
+    return _prog.name();
+}
+
+std::string ProcessHandle::type() const
+{
+    return _prog.type();
+}
+
+void ProcessHandle::display_stats() const
+{
+    std::cout << "pkg,core,dram,gpu,user,system,looped,exec,wall,loops,rate" << std::endl;
+
+    for (auto &stat : _stats) {
+        Energy e = std::get<0>(stat);
+        Time t = std::get<1>(stat);
+        double rate = std::get<2>(stat);
+
+        std::cout << e.package << "," << e.core << "," << e.dram << "," << e.gpu << ","
+            << t.user << "," << t.system << "," << t.looped << ","
+            << t.user + t.system - t.looped << "," << t.wall << ","
+            << e.loops << "," << rate*100 << std::endl;
     }
 }
 
-void Sampler::start()
-{
-    if (_running)
-        return;
-
-    /* Remember that we are now started running */
-    _running = true;
-
-    /* When a program is started, it is always started with measuring enabled */
-    _measuring = true;
-
-    /* If necessary set the alarm for the switch to not measuring */
-    if (_sampling)
-        alarm(_measure);
-}
-
-void Sampler::step()
-{
-    if (!_sampling || !_running)
-        return;
-
-    if (_measuring) {
-        for (auto &proc : _processes) {
-            if (proc->finished())
-                continue;
-
-            proc->measure()->stop();
-        }
-
-        alarm(_not_measure);
-    } else {
-        for (auto &proc : _processes) {
-            if (proc->finished())
-                continue;
-
-            proc->measure()->start();
-        }
-
-        alarm(_measure);
-    }
-
-    _measuring = !_measuring;
-}
-
-void Sampler::stop()
-{
-    if (!_running)
-        return;
-
-    /* Remember that we are not running anymore. */
-    _running = false;
-}
 
 
 class ProcessWatcher
 {
    private:
-    struct ProcessHandle {
-        ProcessPtr process;
-        int runs;
-        std::vector<std::tuple<Energy, Time, double>> stats;
-
-        ProcessHandle(ProcessPtr process) :
-            process{process}, runs{0}, stats{}
-        {}
-    };
-
     std::vector<ProcessHandle> _processes;
     int _sfd;
 
     int _runs;
     bool _automatic_terminate;
     bool _synced_start;
-
-    Sampler _sampler;
 
    private:
     void prepare_signal_fd(const std::vector<unsigned int> &sigs = {SIGCHLD});
@@ -386,10 +389,8 @@ class ProcessWatcher
     bool restart_processes();
     void kill_processes();
 
-    void print_process_stats(const ProcessHandle &ph);
-
    public:
-    ProcessWatcher(const std::vector<ProcessPtr> &processes, const Config &conf);
+    ProcessWatcher(const std::vector<Program> &progs, const Config &conf);
     ProcessWatcher(const ProcessWatcher&) = delete;
     ProcessWatcher(ProcessWatcher &&o);
 
@@ -444,13 +445,7 @@ bool ProcessWatcher::start_processes()
     bool any_started = false;
 
     for (auto &ph : _processes) {
-        if (ph.runs >= _runs)
-            continue;
-
-        ph.process->run();
-        ph.runs++;
-
-        any_started = true;
+        any_started |= ph.start(_runs);
     }
 
     return any_started;
@@ -461,8 +456,7 @@ bool ProcessWatcher::restart_processes()
     /* Automatically kill all other processes if the first one is done. */
     if (_automatic_terminate) {
         for (auto &ph : _processes) {
-            if (!ph.process->finished())
-                ph.process->kill();
+                ph.kill();
         }
     }
 
@@ -471,7 +465,7 @@ bool ProcessWatcher::restart_processes()
         bool all_finished = true;
 
         for (auto &ph : _processes) {
-            all_finished &= ph.process->finished();
+            all_finished &= ph.finished();
         }
 
         if (!all_finished)
@@ -482,19 +476,10 @@ bool ProcessWatcher::restart_processes()
     bool any_started = false;
 
     for (auto &ph : _processes) {
-        if (ph.process->finished()) {
-            /* Save latest stats and clean the process. */
-            ph.stats.emplace_back(std::make_tuple(ph.process->energy(), ph.process->time(), ph.process->rate()));
-            ph.process->wait();
+        if (ph.finished()) {
+            ph.cleanup();
 
-            /* Restart the process if possible */
-            if (ph.runs >= _runs)
-                continue;
-
-            ph.process->run();
-            ph.runs++;
-
-            any_started = true;
+            any_started |= ph.start(_runs);
         }
     }
 
@@ -504,46 +489,24 @@ bool ProcessWatcher::restart_processes()
 void ProcessWatcher::kill_processes()
 {
     for (auto &ph : _processes) {
-        if (!ph.process->finished()) {
-            ph.process->kill();
-
-            /* Get the latest statistics from the process */
-            ph.stats.emplace_back(std::make_tuple(ph.process->energy(), ph.process->time(), ph.process->rate()));
-            ph.process->wait();
-        }
+        ph.kill();
     }
 }
 
-void ProcessWatcher::print_process_stats(const ProcessWatcher::ProcessHandle &ph)
-{
-    std::cout << "pkg,core,dram,gpu,user,system,looped,exec,wall,loops,rate" << std::endl;
-
-    for (auto &stat : ph.stats) {
-        Energy e = std::get<0>(stat);
-        Time t = std::get<1>(stat);
-        double rate = std::get<2>(stat);
-
-        std::cout << e.package << "," << e.core << "," << e.dram << "," << e.gpu << ","
-            << t.user << "," << t.system << "," << t.looped << ","
-            << t.user + t.system - t.looped << "," << t.wall << ","
-            << e.loops << "," << rate*100 << std::endl;
-    }
-}
-
-ProcessWatcher::ProcessWatcher(const std::vector<ProcessPtr> &processes, const Config &conf) :
+ProcessWatcher::ProcessWatcher(const std::vector<Program> &programs, const Config &conf) :
     _processes{}, _sfd{-1}, _runs{conf.repeat}, _automatic_terminate{conf.auto_terminate},
-    _synced_start{conf.sync_start}, _sampler{processes, conf}
+    _synced_start{conf.sync_start}
 {
-    prepare_signal_fd({SIGCHLD, SIGALRM, SIGINT});
+    prepare_signal_fd({SIGCHLD, SIGINT});
 
-    for (auto &proc : processes) {
-        _processes.emplace_back(proc);
+    for (auto &prog : programs) {
+        _processes.emplace_back(prog);
     }
 }
 
 ProcessWatcher::ProcessWatcher(ProcessWatcher &&o) :
-    _processes{std::move(o._processes)}, _sfd{o._sfd}, _runs{o._runs}, _automatic_terminate{o._automatic_terminate},
-    _synced_start{o._synced_start}, _sampler{std::move(o._sampler)}
+    _processes{std::move(o._processes)}, _sfd{o._sfd}, _runs{o._runs},
+    _automatic_terminate{o._automatic_terminate}, _synced_start{o._synced_start}
 {
     o._sfd = -1;
 }
@@ -562,15 +525,10 @@ void ProcessWatcher::loop()
         return;
     }
 
-    _sampler.start();
-
     while (!done) {
         int sig = wait_for_signal();
 
         switch (sig) {
-            case SIGALRM:
-                _sampler.step();
-                break;
             case SIGCHLD:
                 done = !restart_processes();
                 break;
@@ -583,18 +541,16 @@ void ProcessWatcher::loop()
                 done = true;
         }
     }
-
-    _sampler.stop();
 }
 
 void ProcessWatcher::display_process_stats()
 {
     if (_processes.size() == 1) {
-        print_process_stats(_processes[0]);
+        _processes[0].display_stats();
     } else {
         for (auto &ph : _processes) {
-            std::cout << "= " << ph.process->name() << " (" << ph.process->type() << ") =" << std::endl;
-            print_process_stats(ph);
+            std::cout << "= " << ph.name() << " (" << ph.type() << ") =" << std::endl;
+            ph.display_stats();
         }
     }
 }
@@ -655,7 +611,7 @@ bool parse_measure_type(const std::string &arg, MeasureType &mt)
     return false;
 }
 
-void parse_program_definition(int argc, char *argv[], int pos, std::vector<ProcessPtr> &procs,
+void parse_program_definition(int argc, char *argv[], int pos, std::vector<Program> &progs,
         const Config &conf)
 {
     MeasureType mt = ETEAM;
@@ -670,7 +626,7 @@ void parse_program_definition(int argc, char *argv[], int pos, std::vector<Proce
         throw InvalidProgramDefinition{"The measurement type is specified twice. Which one should I use?"};
 
     try {
-        procs.emplace_back(std::make_shared<Process>(argc, argv, pos, mt, conf.redirect));
+        progs.emplace_back(argc, argv, pos, mt, conf.redirect);
     } catch(...) {
         throw InvalidProgramDefinition{"Malformed program definition."};
     }
@@ -712,13 +668,13 @@ int main(int argc, char *argv[])
     }
 
     /* Parse all the programs in our internal representation. */
-    std::vector<ProcessPtr> procs;
+    std::vector<Program> progs;
 
     while (++pos < argc) {
         /* We just jumped over the "--" hence until the next occurrence of a "--" is
          * the program definition. */
         try {
-            parse_program_definition(argc, argv, pos, procs, conf);
+            parse_program_definition(argc, argv, pos, progs, conf);
         } catch (InvalidProgramDefinition &e) {
             std::cout << e.error() << std::endl << std::endl;
             usage(argv[0]);
@@ -735,7 +691,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (procs.size() == 0) {
+    if (progs.size() == 0) {
         std::cout << "No program was specified." << std::endl << std::endl;
         usage(argv[0]);
     }
@@ -751,8 +707,8 @@ int main(int argc, char *argv[])
             << " info=" << conf.info_string() << std::endl;
 
         std::cout << "Measured programs:" << std::endl;
-        for (auto &proc : procs) {
-            std::cout << " " << proc->name() << " (" << proc->type() << ")" << std::endl;
+        for (auto &prog : progs) {
+            std::cout << " " << prog.name() << " (" << prog.type() << ")" << std::endl;
         }
     }
 
@@ -760,7 +716,7 @@ int main(int argc, char *argv[])
     if (conf.info & Config::INFO)
         std::cout << "Start measuring" << std::flush;
 
-    ProcessWatcher pw{procs, conf};
+    ProcessWatcher pw{progs, conf};
     pw.loop();
 
     if (conf.info & Config::INFO)

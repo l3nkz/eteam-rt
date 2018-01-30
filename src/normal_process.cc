@@ -1,4 +1,4 @@
-#include "process.h"
+#include "normal_process.h"
 
 #include <fstream>
 #include <limits>
@@ -16,24 +16,18 @@
 #include "energy.h"
 
 
-Process::Process(Executer *exec, MeasureType mt, const std::string &redirect) :
+namespace detail {
+
+NormalProcess::NormalProcess(Executer *exec, MeasureType mt, const std::string &redirect) :
     _pid{-1}, _measure{Measure::measure_with(mt, this)}, _exec{exec},
     _out_redir{redirect}, _owned{true}
-{}
-
-Process::Process(int argc, char *argv[], int start_arg,
-        MeasureType mt, const std::string &redirect) :
-    Process(new detail::ExecExecuter(argc, argv, start_arg), mt, redirect)
-{}
-
-Process::Process(const std::function<int(void)> &func,
-        MeasureType mt, const std::string &redirect) :
-    Process(new detail::FunctionExecuter(func), mt, redirect)
-{}
-
-Process::~Process()
 {
-    if (_owned) {
+    start();
+}
+
+NormalProcess::~NormalProcess()
+{
+    if (_pid != -1 && _owned) {
         if (!finished())
             kill();
 
@@ -44,11 +38,8 @@ Process::~Process()
     delete _exec;
 }
 
-bool Process::run()
+void NormalProcess::start()
 {
-    if (running())
-        return true;
-
     _start = Clock::now();
     _pid = ::fork();
 
@@ -64,21 +55,18 @@ bool Process::run()
 
         ::exit(_exec->run());
     } else if (_pid > 0){
-        _measure->reset();
         _measure->start();
     } else {
-        return false;
+        throw std::runtime_error{"Failed to fork"};
     }
-
-    return true;
 }
 
-void Process::disown()
+void NormalProcess::disown()
 {
     _owned = false;
 }
 
-int Process::wait()
+int NormalProcess::wait()
 {
     int status;
 
@@ -88,7 +76,7 @@ int Process::wait()
     return WEXITSTATUS(status);
 }
 
-Process::State Process::state() const
+Process::State NormalProcess::state() const
 {
     if (_pid == -1)
         return INVALID;
@@ -130,56 +118,56 @@ Process::State Process::state() const
     }
 }
 
-bool Process::valid() const
+bool NormalProcess::valid() const
 {
     return state() != INVALID;
 }
 
-bool Process::running() const
+bool NormalProcess::running() const
 {
     return state() == RUNNING;
 }
 
-bool Process::finished() const
+bool NormalProcess::finished() const
 {
     auto st = state();
 
     return (st == ZOMBIE) || (st == DEAD);
 }
 
-bool Process::stopped() const
+bool NormalProcess::stopped() const
 {
     return state() == STOPPED;
 }
 
-bool Process::blocked() const
+bool NormalProcess::blocked() const
 {
     auto st = state();
 
     return (st == UNINTERRUPTIBLE) || (st == SLEEPING) || (st == PAGING);
 }
 
-std::string Process::name() const
+std::string NormalProcess::name() const
 {
     return _exec->repr();
 }
 
-std::string Process::type() const
+std::string NormalProcess::type() const
 {
     return _measure->repr();
 }
 
-pid_t Process::pid() const
+pid_t NormalProcess::pid() const
 {
     return _pid;
 }
 
-Energy Process::energy()
+Energy NormalProcess::energy()
 {
     return _measure->energy();
 }
 
-Time Process::time() const
+Time NormalProcess::time() const
 {
     if (_pid == -1)
         return Time{};
@@ -226,12 +214,12 @@ Time Process::time() const
     return t;
 }
 
-double Process::rate()
+double NormalProcess::rate()
 {
     return _measure->rate();
 }
 
-void Process::signal(int signum) const
+void NormalProcess::signal(int signum) const
 {
     if (_pid == -1)
         return;
@@ -239,22 +227,24 @@ void Process::signal(int signum) const
     ::kill(_pid, signum);
 }
 
-void Process::cont() const
+void NormalProcess::cont() const
 {
     signal(SIGCONT);
 }
 
-void Process::stop() const
+void NormalProcess::stop() const
 {
     signal(SIGSTOP);
 }
 
-void Process::kill() const
+void NormalProcess::kill() const
 {
     signal(SIGKILL);
 }
 
-void Process::term() const
+void NormalProcess::term() const
 {
     signal(SIGTERM);
 }
+
+} /* namespace detail */

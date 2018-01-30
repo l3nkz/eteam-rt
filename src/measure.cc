@@ -29,6 +29,20 @@ Measure* Measure::measure_with(MeasureType type, Process *proc)
     }
 }
 
+std::string Measure::measure_name(MeasureType type)
+{
+    switch (type) {
+        case NONE:
+            return detail::NoMeasure::name;
+        case ETEAM:
+            return detail::ETeamMeasure::name;
+        case MSR:
+            return detail::MSRMeasure::name;
+        default:
+            throw std::invalid_argument{"Invalid measurement type"};
+    }
+}
+
 void Measure::update_times()
 {
     if (!_proc->valid())
@@ -105,10 +119,18 @@ double Measure::rate()
 {
     update_times();
 
+    if ((_measured + _not_measured) == 0)
+        return 0;
+
     return _measured / (_measured + _not_measured);
 }
 
 namespace detail {
+
+const std::string NoMeasure::name = {"none"};
+
+
+const std::string ETeamMeasure::name = {"eteam"};
 
 ETeamMeasure::ETeamMeasure(Process *proc) :
     Measure{proc}
@@ -258,6 +280,8 @@ Energy consumed_energy(const Value &start, const Value &end)
 
 } /* namespace rapl */
 
+
+const std::string MSRMeasure::name = {"msr"};
 
 MSRMeasure::MSRMeasure(Process *proc) :
     Measure{proc}, _accum_energy{}, _last_rapl{}

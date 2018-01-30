@@ -19,6 +19,7 @@ class Measure
 {
    public:
     static Measure* measure_with(MeasureType type, Process *proc);
+    static std::string measure_name(MeasureType);
 
    protected:
     bool _running;
@@ -57,10 +58,13 @@ namespace detail {
 class NoMeasure : public Measure
 {
    public:
+    static const std::string name;
+
+   public:
     NoMeasure(Process *proc) : Measure{proc}
     {}
 
-    std::string repr() const { return "none"; }
+    std::string repr() const { return name; }
 
     bool start_() { return true; }
     bool stop_() { return true; }
@@ -73,9 +77,12 @@ class NoMeasure : public Measure
 class ETeamMeasure : public Measure
 {
    public:
+    static const std::string name;
+
+   public:
     ETeamMeasure(Process *proc);
 
-    std::string repr() const { return "eteam"; }
+    std::string repr() const { return name; }
 
     bool start_();
     bool stop_();
@@ -103,6 +110,9 @@ Energy consumed_energy(const Value &start, const Value &end);
 
 class MSRMeasure : public Measure
 {
+   public:
+    static const std::string name;
+
    private:
     Energy _accum_energy;
     rapl::Value _last_rapl;
@@ -110,7 +120,7 @@ class MSRMeasure : public Measure
    public:
     MSRMeasure(Process *proc);
 
-    std::string repr() const { return "msr"; }
+    std::string repr() const { return name; }
 
     bool start_();
     bool stop_();

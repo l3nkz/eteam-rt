@@ -1,20 +1,15 @@
 #ifndef __PROCESS_H__
 #define  __PROCESS_H__
 
-#include <chrono>
-#include <functional>
 #include <memory>
 #include <string>
 
 #include <unistd.h>
 
-#include "execute.h"
 #include "measure.h"
 #include "energy.h"
 #include "time.h"
 
-
-using Clock = std::chrono::high_resolution_clock;
 
 class Process
 {
@@ -31,57 +26,35 @@ class Process
         INVALID
     };
 
-   private:
-    pid_t _pid;
+    virtual ~Process() {}
 
-    Measure *_measure;
-    Executer *_exec;
+    virtual void disown() = 0;
+    virtual int wait() = 0;
 
-    typename Clock::time_point _start;
+    virtual State state() const = 0;
+    virtual bool valid() const = 0;
+    virtual bool running() const = 0;
+    virtual bool finished() const = 0;
+    virtual bool stopped() const = 0;
+    virtual bool blocked() const = 0;
 
-    std::string _out_redir;
-    bool _owned;
+    virtual std::string name() const = 0;
+    virtual std::string type() const = 0;
+    virtual pid_t pid() const = 0;
 
-   private:
-    Process(Executer *exec, MeasureType mt, const std::string &redirect);
+    virtual Measure *measure() = 0;
 
-   public:
-    Process(int argc, char *argv[], int start_arg, MeasureType mt=ETEAM, const std::string &redirect="");
-    Process(const std::function<int(void)> &func, MeasureType mt=ETEAM, const std::string &redirect="");
+    virtual Energy energy() = 0;
+    virtual Time time() const = 0;
+    virtual double rate() = 0;
 
-    ~Process();
-
-    bool run();
-
-    void disown();
-    int wait();
-
-    State state() const;
-    bool valid() const;
-    bool running() const;
-    bool finished() const;
-    bool stopped() const;
-    bool blocked() const;
-
-    std::string name() const;
-    std::string type() const;
-    pid_t pid() const;
-
-    Measure *measure()
-    {
-        return _measure;
-    }
-
-    Energy energy();
-    Time time() const;
-    double rate();
-
-    void signal(int signum) const;
-    void cont() const;
-    void stop() const;
-    void kill() const;
-    void term() const;
+    virtual void signal(int signum) const = 0;
+    virtual void cont() const = 0;
+    virtual void stop() const = 0;
+    virtual void kill() const = 0;
+    virtual void term() const = 0;
 };
+
 
 using ProcessPtr = std::shared_ptr<Process>;
 

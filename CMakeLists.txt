@@ -23,7 +23,8 @@ target_include_directories(eteam
 
 # energy measurement tool
 add_executable(energy
-    src/process.cc
+    src/program.cc
+    src/normal_process.cc
     src/measure.cc
     src/execute.cc
     src/energy.cc

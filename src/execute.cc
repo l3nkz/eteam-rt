@@ -11,9 +11,9 @@
 namespace detail {
 
 ExecExecuter::ExecExecuter(int argc, char *argv[], int start_arg)
-    : _argv{nullptr}
+    : _argv{nullptr}, _argc{0}
 {
-    int end_arg = start_arg, num_args;
+    int end_arg = start_arg;
 
     while (end_arg < argc) {
         std::string arg{argv[end_arg]};
@@ -31,11 +31,9 @@ ExecExecuter::ExecExecuter(int argc, char *argv[], int start_arg)
         throw std::runtime_error{"Missing definition of a program"};
     }
 
-    num_args = end_arg - start_arg - 1; /* The first argument is the program itself */
-    _argv = new char*[num_args + 2]; /* We need one additional space in the array,
-                                        because we have to add NULL at the end and another
-                                        additional space at the beginning for the program
-                                        name itself. */
+    _argc = end_arg - start_arg;
+    _argv = new char*[_argc + 1]; /* We need one additional space in the array,
+                                     because we have to add NULL at the end. */
 
     for (int i = start_arg, j = 0; i < end_arg; ++i, ++j) {
         int len = std::strlen(argv[i]);
@@ -45,7 +43,23 @@ ExecExecuter::ExecExecuter(int argc, char *argv[], int start_arg)
     }
 
     /* Terminate the argument vector */
-    _argv[num_args + 1] = nullptr;
+    _argv[_argc] = nullptr;
+}
+
+ExecExecuter::ExecExecuter(const ExecExecuter& other) :
+    _argv{nullptr}, _argc{other._argc}
+{
+    _argv = new char*[_argc + 1];
+
+    for (int i = 0; i < _argc; ++i) {
+        int len = std::strlen(other._argv[i]);
+
+        _argv[i] = new char[len + 1];
+        std::strcpy(_argv[i], other._argv[i]);
+    }
+
+    /* Terminate the argument vector */
+    _argv[_argc] = nullptr;
 }
 
 ExecExecuter::~ExecExecuter()
@@ -75,6 +89,11 @@ int ExecExecuter::run()
     return 1;
 }
 
+Executer* ExecExecuter::clone() const
+{
+    return new ExecExecuter(*this);
+}
+
 
 FunctionExecuter::FunctionExecuter(const std::function<int(void)> &func) : 
     _func{func}
@@ -90,6 +109,9 @@ int FunctionExecuter::run()
     return _func();
 }
 
+Executer* FunctionExecuter::clone() const
+{
+    return new FunctionExecuter(*this);
+}
+
 } /* namespace detail */
-
-
