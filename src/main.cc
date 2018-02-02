@@ -283,7 +283,7 @@ class ProcessHandle {
     bool finished() const;
 
     bool start(int max_runs);
-    void kill();
+    void term();
     void cleanup();
 
     std::string name() const;
@@ -318,20 +318,20 @@ bool ProcessHandle::start(int max_runs)
     return true;
 }
 
-void ProcessHandle::kill()
+void ProcessHandle::term()
 {
     if (!_cur)
         return;
 
     if (_cur->running())
-        _cur->kill();
+        _cur->term();
 
     cleanup();
 }
 
 void ProcessHandle::cleanup()
 {
-    if (!_cur || !_cur->finished())
+    if (!_cur)
         return;
 
     /* Get the statistics and clean up the zombie */
@@ -369,7 +369,6 @@ void ProcessHandle::display_stats() const
 }
 
 
-
 class ProcessWatcher
 {
    private:
@@ -387,7 +386,7 @@ class ProcessWatcher
 
     bool start_processes();
     bool restart_processes();
-    void kill_processes();
+    void term_processes();
 
    public:
     ProcessWatcher(const std::vector<Program> &progs, const Config &conf);
@@ -453,14 +452,25 @@ bool ProcessWatcher::start_processes()
 
 bool ProcessWatcher::restart_processes()
 {
-    /* Automatically kill all other processes if the first one is done. */
+    /* First check if any of the processes actually finished */
+    bool any_finished = false;
+    for (auto &ph : _processes) {
+        any_finished |= ph.finished();
+    }
+
+    /* If no process finished, this SIGCHLD might already be handled by a previous
+     * invocation of this function. We have nothing to do here, bail out early. */
+    if (!any_finished)
+        return true;
+
+    /* Automatically term all other processes if the first one is done. */
     if (_automatic_terminate) {
         for (auto &ph : _processes) {
-                ph.kill();
+            ph.term();
         }
     }
 
-    /* If synced_start is enabled only continue when all processes finished. */
+    /* If synced_start is enabled -- only continue when all processes finished. */
     if (_synced_start) {
         bool all_finished = true;
 
@@ -486,10 +496,10 @@ bool ProcessWatcher::restart_processes()
     return any_started;
 }
 
-void ProcessWatcher::kill_processes()
+void ProcessWatcher::term_processes()
 {
     for (auto &ph : _processes) {
-        ph.kill();
+        ph.term();
     }
 }
 
@@ -533,7 +543,7 @@ void ProcessWatcher::loop()
                 done = !restart_processes();
                 break;
             case SIGINT:
-                kill_processes();
+                term_processes();
                 done = true;
                 break;
             default:
