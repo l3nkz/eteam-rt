@@ -1,7 +1,7 @@
 # E-Team Energy Measurement Runtime and Library
 
 This repository contains libraries and other runtime binaries designed to ease the usage of the
-[E-Team][eteam] Linux scheduler.
+[E-Team](https://os.inf.tu-dresden.de/papers_ps/atc2017-e-team.pdf) Linux scheduler.
 
 ## Installation
 
