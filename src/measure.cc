@@ -265,15 +265,25 @@ unsigned int Unit::get()
     return _unit;
 }
 
+unsigned long calculate_consumed(const unsigned long start, const unsigned long end)
+{
+    if (start <= end)
+    {
+        return end - start;
+    } else {
+        // rapl overflow
+        return (1UL << 32 - start) + end;
+    }
+}
 
 Energy consumed_energy(const Value &start, const Value &end)
 {
     Energy e;
 
-    e.package = (end.pkg - start.pkg) * Unit::get();
-    e.core = (end.core - start.core) * Unit::get();
-    e.dram = (end.dram - start.dram) * Unit::get();
-    e.gpu = (end.gpu - start.gpu) * Unit::get();
+    e.package = calculate_consumed(start.pkg, end.pkg) * Unit::get();
+    e.core = calculate_consumed(start.core, end.core) * Unit::get();
+    e.dram = calculate_consumed(start.dram, end.dram) * Unit::get();
+    e.gpu = calculate_consumed(start.gpu, end.gpu) * Unit::get();
 
     return e;
 }
