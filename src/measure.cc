@@ -272,7 +272,7 @@ unsigned long calculate_consumed(const unsigned long start, const unsigned long 
         return end - start;
     } else {
         // rapl overflow
-        return (1UL << 32 - start) + end;
+        return (1UL << 32) - start + end;
     }
 }
 
